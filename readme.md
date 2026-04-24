@@ -81,7 +81,7 @@ All settings are saved automatically when you close the app and restored on next
 
 ## Logs
 
-Errors are written to `autoclicker.log` in the same directory as the exe.
+Error are written to `autoclicker.log` in the same directory as the exe.
 
 ---
 
