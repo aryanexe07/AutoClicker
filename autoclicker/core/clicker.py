@@ -78,3 +78,4 @@ class ClickerThread(QThread):
                 break
 
         self.finished_with_reason.emit("Stopped")
+        ## thanku 
