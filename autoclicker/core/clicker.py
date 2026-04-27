@@ -8,6 +8,10 @@ from datetime import datetime
 import pyautogui
 from PyQt6.QtCore import QThread, pyqtSignal
 
+try:
+    from core.app_logger import get_logger
+except ModuleNotFoundError:  # pragma: no cover - package import path
+    from .app_logger import get_logger
 
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0
@@ -45,6 +49,7 @@ class ClickerThread(QThread):
         self._multi_mode = bool(self.config.get("multi_mode", False))
         self._current_multi_index = 0
         self._multi_pass_count = 0
+        self._logger = get_logger()
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -163,7 +168,7 @@ class ClickerThread(QThread):
                 else:
                     self._do_click()
             except Exception as exc:
-                print(f"[AutoClicker] click error: {exc}")
+                self._logger.exception("Click execution error: %s", exc)
 
             executed += 1
             self._session_clicks += 1
@@ -180,4 +185,3 @@ class ClickerThread(QThread):
                 break
 
         self.finished_with_reason.emit("Stopped")
-        ## thanku

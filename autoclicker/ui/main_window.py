@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QSystemTrayIcon,
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QGridLayout,
@@ -34,6 +35,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.clicker import ClickerThread
+from core.app_logger import get_logger
 from core.settings import SettingsStore
 from ui.hotkey_dialog import HotkeyDialog
 
@@ -63,43 +65,85 @@ class GlobalHotkeyListener(threading.Thread):
     def __init__(self, bridge: HotkeyBridge, start_hotkey: str, stop_hotkey: str) -> None:
         super().__init__(daemon=True)
         self.bridge = bridge
-        self.start_hotkey = start_hotkey
-        self.stop_hotkey = stop_hotkey
-        self._listener: Optional[keyboard.GlobalHotKeys] = None
+        self._logger = get_logger()
+        self._hotkey_lock = threading.Lock()
+        self._start_hotkey = start_hotkey
+        self._stop_hotkey = stop_hotkey
+        self._listener: Optional[keyboard.Listener] = None
+        self._pressed_keys: set[str] = set()
+        self._stop_event = threading.Event()
 
     @staticmethod
-    def _to_pynput_expression(hotkey: str) -> str:
-        cleaned = hotkey.lower().replace(" ", "")
-        parts = [part for part in cleaned.split("+") if part]
-        mapped = []
-        for part in parts:
-            if part in {"ctrl", "control"}:
-                mapped.append("<ctrl>")
-            elif part in {"alt"}:
-                mapped.append("<alt>")
-            elif part in {"shift"}:
-                mapped.append("<shift>")
-            elif part in {"cmd", "win", "super", "windows"}:
-                mapped.append("<cmd>")
-            else:
-                mapped.append(part)
-        return "+".join(mapped)
+    def _normalize_key_name(name: str) -> str:
+        cleaned = name.strip().lower()
+        aliases = {
+            "control": "ctrl",
+            "lcontrol": "ctrl",
+            "rcontrol": "ctrl",
+            "alt_l": "alt",
+            "alt_r": "alt",
+            "shift_l": "shift",
+            "shift_r": "shift",
+            "windows": "cmd",
+            "win": "cmd",
+            "super": "cmd",
+        }
+        return aliases.get(cleaned, cleaned)
+
+    @classmethod
+    def _parse_hotkey(cls, hotkey: str) -> set[str]:
+        parts = [part for part in hotkey.lower().replace(" ", "").split("+") if part]
+        return {cls._normalize_key_name(part) for part in parts}
+
+    @classmethod
+    def _key_to_name(cls, key) -> Optional[str]:
+        if isinstance(key, keyboard.KeyCode) and key.char:
+            return cls._normalize_key_name(key.char)
+        if isinstance(key, keyboard.Key):
+            return cls._normalize_key_name(key.name or "")
+        return None
+
+    def update_hotkeys(self, start_hotkey: str, stop_hotkey: str) -> None:
+        with self._hotkey_lock:
+            self._start_hotkey = start_hotkey
+            self._stop_hotkey = stop_hotkey
 
     def run(self) -> None:
-        mapping = {
-            self._to_pynput_expression(self.start_hotkey): self._on_toggle,
-            self._to_pynput_expression(self.stop_hotkey): self._on_stop,
-        }
         try:
-            with keyboard.GlobalHotKeys(mapping) as listener:
-                self._listener = listener
-                listener.join()
+            self._listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
+            self._listener.daemon = True
+            self._listener.start()
+            self._listener.join()
         except Exception as exc:
-            print(f"[AutoClicker] hotkey listener error: {exc}")
+            self._logger.exception("Hotkey listener crashed: %s", exc)
+        finally:
+            self._listener = None
 
     def stop(self) -> None:
+        self._stop_event.set()
         if self._listener is not None:
             self._listener.stop()
+
+    def _on_press(self, key) -> None:
+        if self._stop_event.is_set():
+            return
+        key_name = self._key_to_name(key)
+        if not key_name:
+            return
+        self._pressed_keys.add(key_name)
+        with self._hotkey_lock:
+            start_hotkey = self._parse_hotkey(self._start_hotkey)
+            stop_hotkey = self._parse_hotkey(self._stop_hotkey)
+        if stop_hotkey and stop_hotkey.issubset(self._pressed_keys):
+            self._on_stop()
+            return
+        if start_hotkey and start_hotkey.issubset(self._pressed_keys):
+            self._on_toggle()
+
+    def _on_release(self, key) -> None:
+        key_name = self._key_to_name(key)
+        if key_name:
+            self._pressed_keys.discard(key_name)
 
     def _on_toggle(self) -> None:
         QMetaObject.invokeMethod(self.bridge, "emit_toggle", Qt.ConnectionType.QueuedConnection)
@@ -123,6 +167,10 @@ class MainWindow(QMainWindow):
         self.remaining_delay = 0
         self.session_clicks = 0
         self.hotkey_listener: Optional[GlobalHotkeyListener] = None
+        self.hotkey_watchdog = QTimer(self)
+        self.hotkey_watchdog.setInterval(5000)
+        self.hotkey_watchdog.timeout.connect(self._ensure_hotkey_listener_alive)
+        self._logger = get_logger()
 
         # Recording state
         self.recording = self.config.get("recording", [])  # list of {x, y, delay_ms}
@@ -146,7 +194,8 @@ class MainWindow(QMainWindow):
         self._update_timer_controls()
         self._update_status("Idle")
         self._update_recording_ui()
-        self._restart_hotkey_listener()
+        self._start_hotkey_listener()
+        self.hotkey_watchdog.start()
 
     def _build_ui(self) -> None:
         self.setStyleSheet(
@@ -625,7 +674,7 @@ class MainWindow(QMainWindow):
                         import pyautogui
                         pyautogui.click(x=target_x, y=target_y, clicks=1, button="left")
                     except Exception as e:
-                        print(f"Playback error: {e}")
+                        self._logger.exception("Playback click error: %s", e)
 
         self.playback_thread = threading.Thread(target=playback_loop, daemon=True)
         self.playback_thread.start()
@@ -701,10 +750,9 @@ class MainWindow(QMainWindow):
         data = self._collect_config_from_ui()
         return data
 
-    def _restart_hotkey_listener(self) -> None:
-        if self.hotkey_listener is not None:
-            self.hotkey_listener.stop()
-            self.hotkey_listener = None
+    def _start_hotkey_listener(self) -> None:
+        if self.hotkey_listener is not None and self.hotkey_listener.is_alive():
+            return
         self.hotkey_listener = GlobalHotkeyListener(
             self.hotkey_bridge,
             self.config.get("hotkey_start", "F6"),
@@ -712,6 +760,12 @@ class MainWindow(QMainWindow):
         )
         self.hotkey_listener.start()
         self._update_hotkey_tooltips()
+
+    def _ensure_hotkey_listener_alive(self) -> None:
+        if self.hotkey_listener is not None and self.hotkey_listener.is_alive():
+            return
+        self._logger.warning("Hotkey listener dead; restarting")
+        self._start_hotkey_listener()
 
     def _thread_running(self) -> bool:
         return self.clicker_thread is not None and self.clicker_thread.isRunning()
@@ -787,7 +841,9 @@ class MainWindow(QMainWindow):
             start, stop = dialog.get_hotkeys()
             self.config["hotkey_start"] = start
             self.config["hotkey_stop"] = stop
-            self._restart_hotkey_listener()
+            if self.hotkey_listener is not None:
+                self.hotkey_listener.update_hotkeys(start, stop)
+            self._update_hotkey_tooltips()
 
     def pick_fixed_position(self) -> None:
         self.hide()
@@ -874,6 +930,7 @@ class MainWindow(QMainWindow):
 
     def _quit_application(self) -> None:
         self.stop_clicking()
+        self.hotkey_watchdog.stop()
         if self.hotkey_listener is not None:
             self.hotkey_listener.stop()
         self._save_config_on_close()
@@ -899,6 +956,7 @@ class MainWindow(QMainWindow):
             event.ignore()
         else:
             self.stop_clicking()
+            self.hotkey_watchdog.stop()
             if self.hotkey_listener is not None:
                 self.hotkey_listener.stop()
             self._save_config_on_close()
