@@ -33,6 +33,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QSpinBox,
     QStatusBar,
+    QStyle,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -208,6 +209,7 @@ class MainWindow(QMainWindow):
         self._update_timer_controls()
         self._update_status("Idle")
         self._update_recording_ui()
+        self._setup_tray_icon()
         self._start_hotkey_listener()
         self.hotkey_watchdog.start()
 
@@ -503,6 +505,8 @@ class MainWindow(QMainWindow):
         self.start_delay_spin = QSpinBox()
         self.start_delay_spin.setRange(0, 60)
         form.addRow("Seconds", self.start_delay_spin)
+        self.tray_on_close_check = QCheckBox("Minimise to tray on close")
+        form.addRow("Tray", self.tray_on_close_check)
         actions_row = QHBoxLayout()
         self.export_profile_button = QPushButton("Export Profile")
         self.export_profile_button.clicked.connect(self.export_profile)
@@ -679,7 +683,7 @@ class MainWindow(QMainWindow):
             self.interval_warning_label.setText("⚠ Minimum interval is 10ms")
             self.interval_warning_label.setStyleSheet("color: #D97706;")
             self.interval_warning_label.setVisible(True)
-        elif clamped < 50:
+        elif 10 <= clamped < 30:
             self.interval_warning_label.setText(
                 "⚠ Very fast — tested stable at 50ms. Use with caution."
             )
@@ -1046,6 +1050,7 @@ class MainWindow(QMainWindow):
         self.timer_seconds_spin.setValue(int(self.config.get("timer_seconds", 10)))
 
         self.start_delay_spin.setValue(int(self.config.get("start_delay", 3)))
+        self.tray_on_close_check.setChecked(bool(self.config.get("tray_on_close", True)))
         self.normal_mode_radio.setChecked(not bool(self.config.get("multi_mode", False)))
         self.multipoint_mode_radio.setChecked(bool(self.config.get("multi_mode", False)))
         self.multipoint_table.setRowCount(0)
@@ -1082,7 +1087,7 @@ class MainWindow(QMainWindow):
             "multi_mode": self.multipoint_mode_radio.isChecked(),
             "multipoint_sequence": self._read_multipoint_sequence_from_table(),
             "last_preset": self.presets_combo.currentText(),
-            "tray_on_close": self.tray_on_close_action.isChecked() if hasattr(self, 'tray_on_close_action') else self.config.get("tray_on_close", True),
+            "tray_on_close": self.tray_on_close_check.isChecked(),
             "hotkey_start": self.config.get("hotkey_start", "F6"),
             "hotkey_stop": self.config.get("hotkey_stop", "F7"),
             "recording": self.recording,
@@ -1155,6 +1160,9 @@ class MainWindow(QMainWindow):
         self.clicker_thread.start()
 
     def stop_clicking(self) -> None:
+        if self.playback_thread and self.playback_thread.is_alive():
+            self.playback_stop_event.set()
+            self.playback_thread.join(timeout=0.5)
         if self.countdown_timer.isActive():
             self.countdown_timer.stop()
             self._update_status("Stopped")
@@ -1258,13 +1266,16 @@ class MainWindow(QMainWindow):
         self.activateWindow()
 
     def _setup_tray_icon(self) -> None:
+        if hasattr(self, "tray_icon"):
+            return
         self.tray_icon = QSystemTrayIcon(self)
         icon_path = os.path.join(
             os.path.dirname(__file__), "..", "assets", "icon.ico"
         )
         if os.path.exists(icon_path):
             self.tray_icon.setIcon(QIcon(icon_path))
-        # If no icon, just use default system tray icon (no need to set)
+        else:
+            self.tray_icon.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
         self.tray_icon.setToolTip("AutoClicker")
 
         tray_menu = QMenu()
@@ -1312,7 +1323,7 @@ class MainWindow(QMainWindow):
         self.settings_store.save(merged)
 
     def closeEvent(self, event) -> None:
-        tray_on_close = self.config.get("tray_on_close", True)
+        tray_on_close = self.tray_on_close_check.isChecked() if hasattr(self, "tray_on_close_check") else self.config.get("tray_on_close", True)
         if tray_on_close and hasattr(self, "tray_icon") and self.tray_icon.isVisible():
             self.hide()
             self.tray_icon.showMessage(
