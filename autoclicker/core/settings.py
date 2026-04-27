@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 from typing import Any, Dict
@@ -29,8 +30,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "multi_mode": False,
     "multipoint_sequence": [],
     "presets": {
-        "Web Monitor": {"interval_s": 30, "interval_ms": 0, "loop_mode": "Infinite", "location_mode": "Fixed XY", "click_behaviour": "single", "button": "Left", "random_offset_enabled": False, "start_delay": 3},
-        "Gaming (Fast)": {"interval_ms": 50, "interval_h": 0, "interval_m": 0, "interval_s": 0, "loop_mode": "Infinite", "location_mode": "Follow cursor", "click_behaviour": "single", "button": "Left"},
+        "Web Monitor": {"interval_s": 30, "interval_ms": 0, "repeat_mode": "Infinite", "location_mode": "Fixed XY", "click_behaviour": "single", "button": "Left", "random_offset_enabled": False, "start_delay": 3},
+        "Gaming (Fast)": {"interval_ms": 50, "interval_h": 0, "interval_m": 0, "interval_s": 0, "repeat_mode": "Infinite", "location_mode": "Follow cursor", "click_behaviour": "single", "button": "Left"},
         "Form Filling": {"interval_ms": 500, "interval_h": 0, "interval_m": 0, "interval_s": 0, "repeat_mode": "Fixed count", "repeat_count": 1, "location_mode": "Fixed XY", "click_behaviour": "single", "button": "Left", "start_delay": 0},
     },
 }
@@ -47,8 +48,8 @@ class SettingsStore:
             with open(self.config_path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
             if not isinstance(data, dict):
-                return DEFAULT_CONFIG.copy()
-            merged = DEFAULT_CONFIG.copy()
+                return copy.deepcopy(DEFAULT_CONFIG)
+            merged = copy.deepcopy(DEFAULT_CONFIG)
             merged.update(data)
             if "click_behaviour" not in merged:
                 legacy = str(merged.get("type", "Single")).strip().lower()
@@ -58,11 +59,11 @@ class SettingsStore:
                     merged["click_behaviour"] = "single"
             return merged
         except Exception:
-            return DEFAULT_CONFIG.copy()
+            return copy.deepcopy(DEFAULT_CONFIG)
 
     def save(self, config: Dict[str, Any]) -> None:
         os.makedirs(self.config_dir, exist_ok=True)
-        payload = DEFAULT_CONFIG.copy()
+        payload = copy.deepcopy(DEFAULT_CONFIG)
         payload.update(config)
         with open(self.config_path, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2)

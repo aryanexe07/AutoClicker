@@ -435,19 +435,6 @@ class MainWindow(QMainWindow):
         form.addRow("Fixed XY", fixed_widget)
         self.fixed_widget = fixed_widget
 
-        def update_total():
-            total = (self.interval_h_spin.value() * 3600000 +
-                    self.interval_m_spin.value() * 60000 +
-                    self.interval_s_spin.value() * 1000 +
-                    self.interval_ms_spin.value())
-            if total == 0:
-                total = 10
-            self.total_label.setText(f"= {total}ms")
-
-        self.interval_h_spin.valueChanged.connect(update_total)
-        self.interval_m_spin.valueChanged.connect(update_total)
-        self.interval_s_spin.valueChanged.connect(update_total)
-        self.interval_ms_spin.valueChanged.connect(update_total)
         self.interval_h_spin.valueChanged.connect(self._update_interval_warnings)
         self.interval_m_spin.valueChanged.connect(self._update_interval_warnings)
         self.interval_s_spin.valueChanged.connect(self._update_interval_warnings)
@@ -857,12 +844,60 @@ class MainWindow(QMainWindow):
                     skipped.append(key)
                     self._logger.warning("Skipped unknown profile key: %s", key)
                     continue
-                if key in {"interval_h", "interval_m", "interval_s", "interval_ms"} and (
-                    not isinstance(value, int) or value < 0
-                ):
+                if key == "interval_h" and (not isinstance(value, int) or not (0 <= value <= 23)):
                     skipped.append(key)
-                    self._logger.warning("Skipped invalid interval key: %s", key)
+                    self._logger.warning("Skipped invalid interval_h: %s", value)
                     continue
+                if key in {"interval_m", "interval_s"} and (not isinstance(value, int) or not (0 <= value <= 59)):
+                    skipped.append(key)
+                    self._logger.warning("Skipped invalid %s: %s", key, value)
+                    continue
+                if key == "interval_ms" and (not isinstance(value, int) or not (0 <= value <= 999)):
+                    skipped.append(key)
+                    self._logger.warning("Skipped invalid interval_ms: %s", value)
+                    continue
+                if key == "repeat_count" and (not isinstance(value, int) or value < 1):
+                    skipped.append(key)
+                    self._logger.warning("Skipped invalid repeat_count: %s", value)
+                    continue
+                if key == "timer_seconds" and (not isinstance(value, int) or value < 1):
+                    skipped.append(key)
+                    self._logger.warning("Skipped invalid timer_seconds: %s", value)
+                    continue
+                if key == "start_delay" and (not isinstance(value, int) or not (0 <= value <= 60)):
+                    skipped.append(key)
+                    self._logger.warning("Skipped invalid start_delay: %s", value)
+                    continue
+                if key == "random_offset_px" and (not isinstance(value, int) or not (1 <= value <= 50)):
+                    skipped.append(key)
+                    self._logger.warning("Skipped invalid random_offset_px: %s", value)
+                    continue
+                if key in {"x", "y"} and (not isinstance(value, int) or not (0 <= value <= 99999)):
+                    skipped.append(key)
+                    self._logger.warning("Skipped invalid %s: %s", key, value)
+                    continue
+                if key == "multipoint_sequence":
+                    if not isinstance(value, list):
+                        skipped.append(key)
+                        self._logger.warning("Skipped invalid multipoint_sequence (not list)")
+                        continue
+                    valid_points = []
+                    for idx, point in enumerate(value[:10]):
+                        if not isinstance(point, dict):
+                            self._logger.warning("Skipped multipoint item %s (not object)", idx)
+                            continue
+                        try:
+                            px = int(point.get("x", 0))
+                            py = int(point.get("y", 0))
+                            delay_ms = int(point.get("delay_ms", 100))
+                        except Exception:
+                            self._logger.warning("Skipped multipoint item %s (non-integer fields)", idx)
+                            continue
+                        if not (0 <= px <= 99999 and 0 <= py <= 99999 and delay_ms >= 0):
+                            self._logger.warning("Skipped multipoint item %s (out of range)", idx)
+                            continue
+                        valid_points.append({"x": px, "y": py, "delay_ms": delay_ms})
+                    value = valid_points
                 self.config[key] = value
             self._load_config_to_ui()
             if skipped:
@@ -976,7 +1011,9 @@ class MainWindow(QMainWindow):
         self.playback_thread.start()
 
     def _load_config_to_ui(self) -> None:
+        self.presets_combo.blockSignals(True)
         self.presets_combo.setCurrentText(self.config.get("last_preset", "Custom") or "Custom")
+        self.presets_combo.blockSignals(False)
         self.button_combo.setCurrentText(self.config.get("button", "Left"))
         behaviour_value = str(
             self.config.get("click_behaviour", self.config.get("type", "Single"))
