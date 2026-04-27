@@ -110,5 +110,47 @@ class TestClickerButtonMapping(unittest.TestCase):
             )
 
 
+class TestClickerMultiPoint(unittest.TestCase):
+    def _make_multi_config(self) -> dict:
+        return {
+            "button": "Left",
+            "click_behaviour": "single",
+            "type": "single",
+            "interval_h": 0,
+            "interval_m": 0,
+            "interval_s": 0,
+            "interval_ms": 10,
+            "location_mode": "Fixed XY",
+            "x": 0,
+            "y": 0,
+            "repeat_mode": "Fixed count",
+            "repeat_count": 2,
+            "timer_mode": "None",
+            "timer_seconds": 10,
+            "start_delay": 0,
+            "hotkey_start": "F6",
+            "hotkey_stop": "F7",
+            "multi_mode": True,
+        }
+
+    def test_multipoint_fixed_count_stops_after_passes(self):
+        config = self._make_multi_config()
+        sequence = [{"x": 10, "y": 20, "delay_ms": 0}, {"x": 30, "y": 40, "delay_ms": 0}]
+        with patch("autoclicker.core.clicker.pyautogui.click") as mock_click:
+            with patch("autoclicker.core.clicker.time.sleep"):
+                thread = ClickerThread(config, multi_sequence=sequence)
+                thread.run()
+                self.assertEqual(mock_click.call_count, 4)
+
+    def test_multipoint_session_count_tracks_completed_passes(self):
+        config = self._make_multi_config()
+        sequence = [{"x": 1, "y": 2, "delay_ms": 0}, {"x": 3, "y": 4, "delay_ms": 0}]
+        with patch("autoclicker.core.clicker.pyautogui.click"):
+            with patch("autoclicker.core.clicker.time.sleep"):
+                thread = ClickerThread(config, multi_sequence=sequence)
+                thread.run()
+                self.assertEqual(thread._session_clicks, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

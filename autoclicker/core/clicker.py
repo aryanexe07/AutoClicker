@@ -102,6 +102,7 @@ class ClickerThread(QThread):
                     repeat_count = int(self.config.get("repeat_count", 10))
                     if self._multi_pass_count >= repeat_count:
                         self.finished_with_reason.emit("Stopped")
+                        self._stop_event.set()
                         return
             # Return the delay for multi-point
             time.sleep(delay_after)
@@ -174,9 +175,15 @@ class ClickerThread(QThread):
                 self._logger.exception("Click execution error: %s", exc)
 
             executed += 1
-            self._session_clicks += 1
-            self.click_count_changed.emit(self._session_clicks)
-            self.last_click_time_changed.emit(datetime.now().strftime("%H:%M:%S"))
+            if self._multi_mode and self.multi_sequence:
+                if self._completed_multi_pass:
+                    self._session_clicks += 1
+                    self.click_count_changed.emit(self._session_clicks)
+                    self.last_click_time_changed.emit(datetime.now().strftime("%H:%M:%S"))
+            else:
+                self._session_clicks += 1
+                self.click_count_changed.emit(self._session_clicks)
+                self.last_click_time_changed.emit(datetime.now().strftime("%H:%M:%S"))
 
             if self._multi_mode and self.multi_sequence:
                 if self._completed_multi_pass and self._stop_event.wait(interval_seconds):

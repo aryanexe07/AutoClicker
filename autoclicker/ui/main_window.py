@@ -779,12 +779,32 @@ class MainWindow(QMainWindow):
         self.multipoint_table.setItem(row, 2, QTableWidgetItem(str(y_val)))
         self.multipoint_table.setItem(row, 3, QTableWidgetItem(str(delay_val)))
         pick_btn = QPushButton("Pick")
-        pick_btn.clicked.connect(lambda _=False, idx=row: self.pick_multipoint_position(idx))
+        pick_btn.clicked.connect(self._handle_pick_point_clicked)
         del_btn = QPushButton("Delete")
-        del_btn.clicked.connect(lambda _=False, idx=row: self.delete_multipoint_row(idx))
+        del_btn.clicked.connect(self._handle_delete_point_clicked)
         self.multipoint_table.setCellWidget(row, 4, pick_btn)
         self.multipoint_table.setCellWidget(row, 5, del_btn)
         self._renumber_multipoint_rows()
+
+    def _row_for_action_button(self, button: QPushButton, column: int) -> int:
+        for row in range(self.multipoint_table.rowCount()):
+            if self.multipoint_table.cellWidget(row, column) is button:
+                return row
+        return -1
+
+    def _handle_pick_point_clicked(self) -> None:
+        sender = self.sender()
+        if isinstance(sender, QPushButton):
+            row = self._row_for_action_button(sender, 4)
+            if row >= 0:
+                self.pick_multipoint_position(row)
+
+    def _handle_delete_point_clicked(self) -> None:
+        sender = self.sender()
+        if isinstance(sender, QPushButton):
+            row = self._row_for_action_button(sender, 5)
+            if row >= 0:
+                self.delete_multipoint_row(row)
 
     def delete_multipoint_row(self, row: int) -> None:
         if 0 <= row < self.multipoint_table.rowCount():
