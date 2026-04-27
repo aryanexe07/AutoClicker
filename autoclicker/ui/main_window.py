@@ -27,6 +27,14 @@ from core.settings import SettingsStore
 from ui.hotkey_dialog import HotkeyDialog
 
 
+CLICK_BEHAVIOUR_LABEL_TO_VALUE = {
+    "Single": "single",
+    "Double": "double",
+    "Triple": "triple",
+}
+CLICK_BEHAVIOUR_VALUE_TO_LABEL = {value: label for label, value in CLICK_BEHAVIOUR_LABEL_TO_VALUE.items()}
+
+
 class HotkeyBridge(QObject):
     toggle_requested = pyqtSignal()
     stop_requested = pyqtSignal()
@@ -212,7 +220,7 @@ class MainWindow(QMainWindow):
         form.addRow("Button", self.button_combo)
 
         self.type_combo = QComboBox()
-        self.type_combo.addItems(["Single", "Double"])
+        self.type_combo.addItems(["Single", "Double", "Triple"])
         form.addRow("Type", self.type_combo)
 
         interval_row = QHBoxLayout()
@@ -344,7 +352,11 @@ class MainWindow(QMainWindow):
 
     def _load_config_to_ui(self) -> None:
         self.button_combo.setCurrentText(self.config["button"])
-        self.type_combo.setCurrentText(self.config["type"])
+        behaviour_value = str(
+            self.config.get("click_behaviour", self.config.get("type", "Single"))
+        ).strip().lower()
+        behaviour_label = CLICK_BEHAVIOUR_VALUE_TO_LABEL.get(behaviour_value, "Single")
+        self.type_combo.setCurrentText(behaviour_label)
 
         interval_ms = int(self.config["interval_ms"])
         if interval_ms >= 1000 and interval_ms % 1000 == 0:
@@ -380,6 +392,9 @@ class MainWindow(QMainWindow):
         return {
             "button": self.button_combo.currentText(),
             "type": self.type_combo.currentText(),
+            "click_behaviour": CLICK_BEHAVIOUR_LABEL_TO_VALUE.get(
+                self.type_combo.currentText(), "single"
+            ),
             "interval_ms": interval_ms,
             "location_mode": self.location_combo.currentText(),
             "x": int(self.x_spin.value()),

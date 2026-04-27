@@ -6,6 +6,7 @@ from typing import Any, Dict
 DEFAULT_CONFIG: Dict[str, Any] = {
     "button": "Left",
     "type": "Single",
+    "click_behaviour": "single",
     "interval_ms": 100,
     "location_mode": "Follow cursor",
     "x": 0,
@@ -24,7 +25,7 @@ class SettingsStore:
     def __init__(self) -> None:
         appdata = os.getenv("APPDATA", os.path.expanduser("~"))
         self.config_dir = os.path.join(appdata, "AutoClicker")
-        self.config_path = os.path.join(self.config_dir, "config.json")
+        self.config_path = os.path.join(self.config_dir, "autoclicker_config.json")
 
     def load(self) -> Dict[str, Any]:
         try:
@@ -34,6 +35,12 @@ class SettingsStore:
                 return DEFAULT_CONFIG.copy()
             merged = DEFAULT_CONFIG.copy()
             merged.update(data)
+            if "click_behaviour" not in merged:
+                legacy = str(merged.get("type", "Single")).strip().lower()
+                if legacy in {"single", "double", "triple"}:
+                    merged["click_behaviour"] = legacy
+                else:
+                    merged["click_behaviour"] = "single"
             return merged
         except Exception:
             return DEFAULT_CONFIG.copy()

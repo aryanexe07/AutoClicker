@@ -11,6 +11,11 @@ pyautogui.PAUSE = 0
 
 
 BUTTON_MAP = {"Left": "left", "Right": "right", "Middle": "middle"}
+CLICK_BEHAVIOUR_TO_COUNT = {
+    "single": 1,
+    "double": 2,
+    "triple": 3,
+}
 
 
 class ClickerThread(QThread):
@@ -30,15 +35,25 @@ class ClickerThread(QThread):
 
     def _do_click(self) -> None:
         button = BUTTON_MAP.get(self.config["button"], "left")
-        click_count = 2 if self.config["type"] == "Double" else 1
+        click_behaviour = str(
+            self.config.get("click_behaviour", self.config.get("type", "Single"))
+        ).strip().lower()
+        click_count = CLICK_BEHAVIOUR_TO_COUNT.get(click_behaviour, 1)
+        sub_click_interval = 0.03 if click_count == 3 else 0
 
         if self.config["location_mode"] == "Fixed XY":
             x = int(self.config["x"])
             y = int(self.config["y"])
-            pyautogui.click(x=x, y=y, clicks=click_count, interval=0, button=button)
+            pyautogui.click(
+                x=x,
+                y=y,
+                clicks=click_count,
+                interval=sub_click_interval,
+                button=button,
+            )
             return
 
-        pyautogui.click(clicks=click_count, interval=0, button=button)
+        pyautogui.click(clicks=click_count, interval=sub_click_interval, button=button)
 
     def run(self) -> None:
         self._stop_event.clear()

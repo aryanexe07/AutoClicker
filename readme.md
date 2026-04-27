@@ -50,7 +50,7 @@ This produces a single `AutoClicker.exe` inside the `dist/` folder. No Python in
 | Feature | How to use |
 |---|---|
 | **Click type** | Choose Left / Right / Middle from the dropdown |
-| **Single / Double** | Toggle the click behaviour radio button |
+| **Single / Double / Triple** | Toggle the click behaviour option |
 | **Click speed** | Enter a number and pick ms or seconds |
 | **Location** | "Current position" follows your cursor. "Fixed" lets you type or pick coordinates |
 | **Pick coordinates** | Click the Pick button, then click anywhere on screen |
@@ -75,7 +75,7 @@ Hotkeys work even when the app is in the background.
 
 ## Settings
 
-All settings are saved automatically when you close the app and restored on next launch (`autoclicker_config.json` in the same folder as the exe).
+All settings are saved automatically when you close the app and restored on next launch (`autoclicker_config.json`).
 
 ---
 
