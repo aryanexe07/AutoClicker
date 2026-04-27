@@ -25,6 +25,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "hotkey_start": "F6",
     "hotkey_stop": "F7",
     "recording": [],
+    "last_preset": "",
+    "multipoint_sequence": [],
+    "presets": {
+        "Web Monitor": {"interval_s": 30, "interval_ms": 0, "loop_mode": "Infinite", "location_mode": "Fixed XY", "click_behaviour": "single", "button": "Left", "random_offset_enabled": False, "start_delay": 3},
+        "Gaming (Fast)": {"interval_ms": 50, "interval_h": 0, "interval_m": 0, "interval_s": 0, "loop_mode": "Infinite", "location_mode": "Follow cursor", "click_behaviour": "single", "button": "Left"},
+        "Form Filling": {"interval_ms": 500, "interval_h": 0, "interval_m": 0, "interval_s": 0, "repeat_mode": "Fixed count", "repeat_count": 1, "location_mode": "Fixed XY", "click_behaviour": "single", "button": "Left", "start_delay": 0},
+    },
 }
 
 
