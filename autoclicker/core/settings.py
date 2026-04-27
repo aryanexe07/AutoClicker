@@ -26,6 +26,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "hotkey_stop": "F7",
     "recording": [],
     "last_preset": "",
+    "multi_mode": False,
     "multipoint_sequence": [],
     "presets": {
         "Web Monitor": {"interval_s": 30, "interval_ms": 0, "loop_mode": "Infinite", "location_mode": "Fixed XY", "click_behaviour": "single", "button": "Left", "random_offset_enabled": False, "start_delay": 3},

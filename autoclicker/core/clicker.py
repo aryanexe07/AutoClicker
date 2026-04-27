@@ -49,6 +49,7 @@ class ClickerThread(QThread):
         self._multi_mode = bool(self.config.get("multi_mode", False))
         self._current_multi_index = 0
         self._multi_pass_count = 0
+        self._completed_multi_pass = False
         self._logger = get_logger()
 
     def stop(self) -> None:
@@ -73,6 +74,7 @@ class ClickerThread(QThread):
     def _do_click(self) -> None:
         """Perform a click (used in normal mode vs multi-point mode)."""
         if self._multi_mode and self.multi_sequence:
+            self._completed_multi_pass = False
             # Iterate through multi-point sequence
             point = self.multi_sequence[self._current_multi_index]
             px = int(point["x"])
@@ -94,6 +96,7 @@ class ClickerThread(QThread):
             if self._current_multi_index >= len(self.multi_sequence):
                 self._current_multi_index = 0
                 self._multi_pass_count += 1
+                self._completed_multi_pass = True
                 repeat_mode = self.config.get("repeat_mode", "Infinite")
                 if repeat_mode == "Fixed count":
                     repeat_count = int(self.config.get("repeat_count", 10))
@@ -152,7 +155,7 @@ class ClickerThread(QThread):
         executed = 0
 
         while not self._stop_event.is_set():
-            if repeat_mode == "Fixed count" and executed >= repeat_count:
+            if not self._multi_mode and repeat_mode == "Fixed count" and executed >= repeat_count:
                 self.finished_with_reason.emit("Stopped")
                 return
 
@@ -175,9 +178,8 @@ class ClickerThread(QThread):
             self.click_count_changed.emit(self._session_clicks)
             self.last_click_time_changed.emit(datetime.now().strftime("%H:%M:%S"))
 
-            # In multi-point mode, delay is handled per-point; use interval only between full passes
             if self._multi_mode and self.multi_sequence:
-                if self._stop_event.wait(interval_seconds):
+                if self._completed_multi_pass and self._stop_event.wait(interval_seconds):
                     break
                 continue
 

@@ -2,6 +2,7 @@ import json
 import os
 import threading
 import time
+from collections import deque
 from typing import List, Optional
 
 from pynput import keyboard, mouse
@@ -13,6 +14,7 @@ from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -25,8 +27,10 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QProgressBar,
     QRadioButton,
-    QScrollArea,
+    QTableWidget,
+    QTableWidgetItem,
     QSpinBox,
     QStatusBar,
     QToolBar,
@@ -36,7 +40,7 @@ from PyQt6.QtWidgets import (
 
 from core.clicker import ClickerThread
 from core.app_logger import get_logger
-from core.settings import SettingsStore
+from core.settings import DEFAULT_CONFIG, SettingsStore
 from ui.hotkey_dialog import HotkeyDialog
 
 
@@ -46,6 +50,7 @@ CLICK_BEHAVIOUR_LABEL_TO_VALUE = {
     "Triple": "triple",
 }
 CLICK_BEHAVIOUR_VALUE_TO_LABEL = {value: label for label, value in CLICK_BEHAVIOUR_LABEL_TO_VALUE.items()}
+PRESET_NAMES = ["Custom", "Web Monitor", "Gaming (Fast)", "Form Filling"]
 
 
 class HotkeyBridge(QObject):
@@ -171,6 +176,13 @@ class MainWindow(QMainWindow):
         self.hotkey_watchdog.setInterval(5000)
         self.hotkey_watchdog.timeout.connect(self._ensure_hotkey_listener_alive)
         self._logger = get_logger()
+        self.fast_warning_acknowledged = False
+        self.session_start_time = 0.0
+        self.click_timestamps: deque[float] = deque()
+        self.stats_timer = QTimer(self)
+        self.stats_timer.setInterval(250)
+        self.stats_timer.timeout.connect(self._update_stats_panel)
+        self.stats_expanded = False
 
         # Recording state
         self.recording = self.config.get("recording", [])  # list of {x, y, delay_ms}
@@ -182,6 +194,8 @@ class MainWindow(QMainWindow):
         # Playback state
         self.playback_thread: Optional[threading.Thread] = None
         self.playback_stop_event = threading.Event()
+        self.multipoint_sequence = self.config.get("multipoint_sequence", [])
+        self._pick_target_row: Optional[int] = None
 
         self.hotkey_bridge = HotkeyBridge()
         self.hotkey_bridge.toggle_requested.connect(self.toggle_start_stop)
@@ -320,10 +334,13 @@ class MainWindow(QMainWindow):
         container.setContentsMargins(12, 8, 12, 8)
         container.setSpacing(8)
 
+        container.addWidget(self._build_presets_group())
         container.addWidget(self._build_click_config_group())
         container.addWidget(self._build_loop_timer_group())
         container.addWidget(self._build_start_delay_group())
+        container.addWidget(self._build_multipoint_group())
         container.addWidget(self._build_recording_group())
+        container.addWidget(self._build_stats_group())
         container.addStretch(1)
 
         self.setCentralWidget(root)
@@ -377,6 +394,9 @@ class MainWindow(QMainWindow):
         interval_widget = QWidget()
         interval_widget.setLayout(interval_row)
         form.addRow("Interval", interval_widget)
+        self.interval_warning_label = QLabel("")
+        self.interval_warning_label.setVisible(False)
+        form.addRow("", self.interval_warning_label)
 
         self.location_combo = QComboBox()
         self.location_combo.addItems(["Follow cursor", "Fixed XY"])
@@ -428,7 +448,23 @@ class MainWindow(QMainWindow):
         self.interval_m_spin.valueChanged.connect(update_total)
         self.interval_s_spin.valueChanged.connect(update_total)
         self.interval_ms_spin.valueChanged.connect(update_total)
+        self.interval_h_spin.valueChanged.connect(self._update_interval_warnings)
+        self.interval_m_spin.valueChanged.connect(self._update_interval_warnings)
+        self.interval_s_spin.valueChanged.connect(self._update_interval_warnings)
+        self.interval_ms_spin.valueChanged.connect(self._update_interval_warnings)
 
+        return group
+
+    def _build_presets_group(self) -> QGroupBox:
+        group = QGroupBox("Presets")
+        form = QFormLayout(group)
+        self.presets_combo = QComboBox()
+        self.presets_combo.addItems(PRESET_NAMES)
+        self.presets_combo.setToolTip(
+            "Presets fill in recommended settings. You can adjust them freely after selecting."
+        )
+        self.presets_combo.currentTextChanged.connect(self._apply_preset)
+        form.addRow("Preset", self.presets_combo)
         return group
 
     def _build_loop_timer_group(self) -> QGroupBox:
@@ -480,6 +516,69 @@ class MainWindow(QMainWindow):
         self.start_delay_spin = QSpinBox()
         self.start_delay_spin.setRange(0, 60)
         form.addRow("Seconds", self.start_delay_spin)
+        actions_row = QHBoxLayout()
+        self.export_profile_button = QPushButton("Export Profile")
+        self.export_profile_button.clicked.connect(self.export_profile)
+        self.import_profile_button = QPushButton("Import Profile")
+        self.import_profile_button.clicked.connect(self.import_profile)
+        actions_row.addWidget(self.export_profile_button)
+        actions_row.addWidget(self.import_profile_button)
+        actions_widget = QWidget()
+        actions_widget.setLayout(actions_row)
+        form.addRow("Profiles", actions_widget)
+        return group
+
+    def _build_multipoint_group(self) -> QGroupBox:
+        group = QGroupBox("Multi-Point")
+        layout = QVBoxLayout(group)
+        mode_row = QHBoxLayout()
+        self.normal_mode_radio = QRadioButton("Normal")
+        self.multipoint_mode_radio = QRadioButton("Multi-Point")
+        self.mode_group = QButtonGroup(self)
+        self.mode_group.addButton(self.normal_mode_radio)
+        self.mode_group.addButton(self.multipoint_mode_radio)
+        self.normal_mode_radio.setChecked(True)
+        mode_row.addWidget(self.normal_mode_radio)
+        mode_row.addWidget(self.multipoint_mode_radio)
+        mode_row.addStretch(1)
+        layout.addLayout(mode_row)
+
+        self.multipoint_table = QTableWidget(0, 6)
+        self.multipoint_table.setHorizontalHeaderLabels(["#", "X", "Y", "Delay (ms)", "Pick", "Delete"])
+        self.multipoint_table.verticalHeader().setVisible(False)
+        self.multipoint_table.setMaximumHeight(180)
+        layout.addWidget(self.multipoint_table)
+
+        add_row = QHBoxLayout()
+        self.add_point_button = QPushButton("Add Point")
+        self.add_point_button.clicked.connect(self.add_multipoint_row)
+        add_row.addWidget(self.add_point_button)
+        add_row.addStretch(1)
+        layout.addLayout(add_row)
+        return group
+
+    def _build_stats_group(self) -> QGroupBox:
+        group = QGroupBox("Stats")
+        layout = QVBoxLayout(group)
+        self.stats_toggle = QPushButton("▶ Stats")
+        self.stats_toggle.clicked.connect(self._toggle_stats_panel)
+        layout.addWidget(self.stats_toggle)
+        self.stats_body = QWidget()
+        grid = QGridLayout(self.stats_body)
+        self.stats_total_label = QLabel("Total clicks this session: 0")
+        self.stats_elapsed_label = QLabel("Elapsed: 00:00")
+        self.stats_cps_label = QLabel("Clicks per second (5s): 0.00")
+        self.stats_progress_label = QLabel("Progress: N/A")
+        self.stats_progress_bar = QProgressBar()
+        self.stats_progress_bar.setRange(0, 1)
+        self.stats_progress_bar.setValue(0)
+        grid.addWidget(self.stats_total_label, 0, 0)
+        grid.addWidget(self.stats_elapsed_label, 0, 1)
+        grid.addWidget(self.stats_cps_label, 1, 0)
+        grid.addWidget(self.stats_progress_label, 1, 1)
+        grid.addWidget(self.stats_progress_bar, 2, 0, 1, 2)
+        self.stats_body.setVisible(False)
+        layout.addWidget(self.stats_body)
         return group
 
     def _build_recording_group(self) -> QGroupBox:
@@ -578,6 +677,183 @@ class MainWindow(QMainWindow):
                 self.interval_s_spin.value() * 1000 +
                 self.interval_ms_spin.value())
         return max(10, total)
+
+    def _raw_interval_ms(self) -> int:
+        return (self.interval_h_spin.value() * 3600000 +
+                self.interval_m_spin.value() * 60000 +
+                self.interval_s_spin.value() * 1000 +
+                self.interval_ms_spin.value())
+
+    def _update_interval_warnings(self) -> None:
+        raw = self._raw_interval_ms()
+        clamped = max(10, raw)
+        self.total_label.setText(f"= {clamped}ms")
+        if raw < 10:
+            self.interval_warning_label.setText("⚠ Minimum interval is 10ms")
+            self.interval_warning_label.setStyleSheet("color: #D97706;")
+            self.interval_warning_label.setVisible(True)
+        elif clamped < 50:
+            self.interval_warning_label.setText(
+                "⚠ Very fast — tested stable at 50ms. Use with caution."
+            )
+            self.interval_warning_label.setStyleSheet("color: #CA8A04;")
+            self.interval_warning_label.setVisible(True)
+        else:
+            self.interval_warning_label.setVisible(False)
+
+    def _apply_preset(self, preset_name: str) -> None:
+        if preset_name == "Custom":
+            return
+        if preset_name == "Web Monitor":
+            self.location_combo.setCurrentText("Fixed XY")
+            self.button_combo.setCurrentText("Left")
+            self.type_combo.setCurrentText("Single")
+            self.repeat_infinite_radio.setChecked(True)
+            self.interval_h_spin.setValue(0)
+            self.interval_m_spin.setValue(0)
+            self.interval_s_spin.setValue(30)
+            self.interval_ms_spin.setValue(0)
+            self.start_delay_spin.setValue(3)
+            self.random_offset_check.setChecked(False)
+        elif preset_name == "Gaming (Fast)":
+            self.location_combo.setCurrentText("Follow cursor")
+            self.button_combo.setCurrentText("Left")
+            self.type_combo.setCurrentText("Single")
+            self.repeat_infinite_radio.setChecked(True)
+            self.interval_h_spin.setValue(0)
+            self.interval_m_spin.setValue(0)
+            self.interval_s_spin.setValue(0)
+            self.interval_ms_spin.setValue(50)
+        elif preset_name == "Form Filling":
+            self.location_combo.setCurrentText("Fixed XY")
+            self.button_combo.setCurrentText("Left")
+            self.type_combo.setCurrentText("Single")
+            self.repeat_fixed_radio.setChecked(True)
+            self.repeat_count_spin.setValue(1)
+            self.interval_h_spin.setValue(0)
+            self.interval_m_spin.setValue(0)
+            self.interval_s_spin.setValue(0)
+            self.interval_ms_spin.setValue(500)
+        self.config["last_preset"] = preset_name
+        self._update_interval_warnings()
+
+    def _toggle_stats_panel(self) -> None:
+        self.stats_expanded = not self.stats_expanded
+        self.stats_body.setVisible(self.stats_expanded)
+        self.stats_toggle.setText("▼ Stats" if self.stats_expanded else "▶ Stats")
+
+    def _update_stats_panel(self) -> None:
+        self.stats_total_label.setText(f"Total clicks this session: {self.session_clicks}")
+        elapsed = int(max(0, time.monotonic() - self.session_start_time)) if self.session_start_time else 0
+        self.stats_elapsed_label.setText(f"Elapsed: {elapsed // 60:02d}:{elapsed % 60:02d}")
+        now = time.monotonic()
+        while self.click_timestamps and now - self.click_timestamps[0] > 5.0:
+            self.click_timestamps.popleft()
+        cps = len(self.click_timestamps) / 5.0
+        self.stats_cps_label.setText(f"Clicks per second (5s): {cps:.2f}")
+        if self.repeat_fixed_radio.isChecked():
+            total = int(self.repeat_count_spin.value())
+            current = min(self.session_clicks, total)
+            self.stats_progress_label.setText(f"Progress: {current} / {total}")
+            self.stats_progress_bar.setRange(0, total)
+            self.stats_progress_bar.setValue(current)
+        else:
+            self.stats_progress_label.setText("Progress: Infinite")
+            self.stats_progress_bar.setRange(0, 1)
+            self.stats_progress_bar.setValue(0)
+
+    def _renumber_multipoint_rows(self) -> None:
+        for i in range(self.multipoint_table.rowCount()):
+            self.multipoint_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
+        self.add_point_button.setEnabled(self.multipoint_table.rowCount() < 10)
+
+    def add_multipoint_row(self, point: Optional[dict] = None) -> None:
+        if self.multipoint_table.rowCount() >= 10:
+            return
+        row = self.multipoint_table.rowCount()
+        self.multipoint_table.insertRow(row)
+        x_val = int(point.get("x", 0)) if point else 0
+        y_val = int(point.get("y", 0)) if point else 0
+        delay_val = int(point.get("delay_ms", 100)) if point else 100
+        self.multipoint_table.setItem(row, 1, QTableWidgetItem(str(x_val)))
+        self.multipoint_table.setItem(row, 2, QTableWidgetItem(str(y_val)))
+        self.multipoint_table.setItem(row, 3, QTableWidgetItem(str(delay_val)))
+        pick_btn = QPushButton("Pick")
+        pick_btn.clicked.connect(lambda _=False, idx=row: self.pick_multipoint_position(idx))
+        del_btn = QPushButton("Delete")
+        del_btn.clicked.connect(lambda _=False, idx=row: self.delete_multipoint_row(idx))
+        self.multipoint_table.setCellWidget(row, 4, pick_btn)
+        self.multipoint_table.setCellWidget(row, 5, del_btn)
+        self._renumber_multipoint_rows()
+
+    def delete_multipoint_row(self, row: int) -> None:
+        if 0 <= row < self.multipoint_table.rowCount():
+            self.multipoint_table.removeRow(row)
+            self._renumber_multipoint_rows()
+
+    def pick_multipoint_position(self, row: int) -> None:
+        self._pick_target_row = row
+        self.hide()
+        QTimer.singleShot(3000, self._capture_position_click)
+
+    def _read_multipoint_sequence_from_table(self) -> list[dict]:
+        points = []
+        for row in range(self.multipoint_table.rowCount()):
+            try:
+                x = int(self.multipoint_table.item(row, 1).text())
+                y = int(self.multipoint_table.item(row, 2).text())
+                d = max(0, int(self.multipoint_table.item(row, 3).text()))
+                points.append({"x": x, "y": y, "delay_ms": d})
+            except Exception:
+                continue
+        return points
+
+    def export_profile(self) -> None:
+        target, _ = QFileDialog.getSaveFileName(
+            self, "Export Profile", "AutoClicker_Profile.json", "JSON Files (*.json)"
+        )
+        if not target:
+            return
+        payload = self._collect_config_from_ui()
+        try:
+            with open(target, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, indent=2)
+        except Exception as exc:
+            self._logger.exception("Export profile failed: %s", exc)
+            QMessageBox.warning(self, "Export Profile", "Failed to export profile.")
+
+    def import_profile(self) -> None:
+        source, _ = QFileDialog.getOpenFileName(self, "Import Profile", "", "JSON Files (*.json)")
+        if not source:
+            return
+        skipped = []
+        try:
+            with open(source, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict):
+                raise ValueError("Profile must be a JSON object")
+            for key, value in data.items():
+                if key not in DEFAULT_CONFIG and key not in {"click_behaviour", "type"}:
+                    skipped.append(key)
+                    self._logger.warning("Skipped unknown profile key: %s", key)
+                    continue
+                if key in {"interval_h", "interval_m", "interval_s", "interval_ms"} and (
+                    not isinstance(value, int) or value < 0
+                ):
+                    skipped.append(key)
+                    self._logger.warning("Skipped invalid interval key: %s", key)
+                    continue
+                self.config[key] = value
+            self._load_config_to_ui()
+            if skipped:
+                QMessageBox.information(
+                    self, "Import Profile", f"Profile loaded with skipped keys: {', '.join(skipped)}"
+                )
+            else:
+                QMessageBox.information(self, "Import Profile", "Profile loaded successfully")
+        except Exception as exc:
+            self._logger.exception("Import profile failed: %s", exc)
+            QMessageBox.warning(self, "Import Profile", "Failed to import profile.")
 
     def _toggle_recording(self) -> None:
         if self.is_recording:
@@ -680,6 +956,7 @@ class MainWindow(QMainWindow):
         self.playback_thread.start()
 
     def _load_config_to_ui(self) -> None:
+        self.presets_combo.setCurrentText(self.config.get("last_preset", "Custom") or "Custom")
         self.button_combo.setCurrentText(self.config.get("button", "Left"))
         behaviour_value = str(
             self.config.get("click_behaviour", self.config.get("type", "Single"))
@@ -712,9 +989,15 @@ class MainWindow(QMainWindow):
         self.timer_seconds_spin.setValue(int(self.config.get("timer_seconds", 10)))
 
         self.start_delay_spin.setValue(int(self.config.get("start_delay", 3)))
+        self.normal_mode_radio.setChecked(not bool(self.config.get("multi_mode", False)))
+        self.multipoint_mode_radio.setChecked(bool(self.config.get("multi_mode", False)))
+        self.multipoint_table.setRowCount(0)
+        for point in self.config.get("multipoint_sequence", []):
+            self.add_multipoint_row(point)
         self._update_hotkey_tooltips()
         self.recording = self.config.get("recording", [])
         self._update_recording_ui()
+        self._update_interval_warnings()
 
     def _collect_config_from_ui(self) -> dict:
         interval_ms = self._get_interval_ms()
@@ -739,6 +1022,9 @@ class MainWindow(QMainWindow):
             "timer_mode": "Stop after N seconds" if self.timer_stop_radio.isChecked() else "None",
             "timer_seconds": int(self.timer_seconds_spin.value()),
             "start_delay": int(self.start_delay_spin.value()),
+            "multi_mode": self.multipoint_mode_radio.isChecked(),
+            "multipoint_sequence": self._read_multipoint_sequence_from_table(),
+            "last_preset": self.presets_combo.currentText(),
             "tray_on_close": self.tray_on_close_action.isChecked() if hasattr(self, 'tray_on_close_action') else self.config.get("tray_on_close", True),
             "hotkey_start": self.config.get("hotkey_start", "F6"),
             "hotkey_stop": self.config.get("hotkey_stop", "F7"),
@@ -773,6 +1059,20 @@ class MainWindow(QMainWindow):
     def start_clicking(self) -> None:
         if self._thread_running() or self.countdown_timer.isActive():
             return
+        if self._get_interval_ms() < 50 and not self.fast_warning_acknowledged:
+            result = QMessageBox.question(
+                self,
+                "Speed Warning",
+                "You're clicking faster than 50ms. The app has been tested stable at 50ms intervals. Continue?",
+                QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            )
+            if result != QMessageBox.StandardButton.Ok:
+                return
+            self.fast_warning_acknowledged = True
+        self.session_clicks = 0
+        self.click_timestamps.clear()
+        self.session_start_time = time.monotonic()
+        self.stats_timer.start()
         self.remaining_delay = int(self.start_delay_spin.value())
         if self.remaining_delay > 0:
             self._update_status(f"Waiting ({self.remaining_delay}s)")
@@ -790,7 +1090,7 @@ class MainWindow(QMainWindow):
 
     def _begin_thread(self) -> None:
         config = self._build_click_config_for_thread()
-        self.clicker_thread = ClickerThread(config)
+        self.clicker_thread = ClickerThread(config, multi_sequence=config.get("multipoint_sequence", []))
         self.clicker_thread.state_changed.connect(self._update_status)
         self.clicker_thread.click_count_changed.connect(self._on_click_count_changed)
         self.clicker_thread.last_click_time_changed.connect(self._on_last_click_time_changed)
@@ -801,11 +1101,14 @@ class MainWindow(QMainWindow):
         if self.countdown_timer.isActive():
             self.countdown_timer.stop()
             self._update_status("Stopped")
+            self.stats_timer.stop()
         if self._thread_running():
             self.clicker_thread.stop()
             self.clicker_thread.wait(1500)
         else:
             self._update_status("Stopped")
+            self.stats_timer.stop()
+            self._update_stats_panel()
 
     @pyqtSlot()
     def toggle_start_stop(self) -> None:
@@ -821,7 +1124,9 @@ class MainWindow(QMainWindow):
     @pyqtSlot(int)
     def _on_click_count_changed(self, count: int) -> None:
         self.session_clicks = count
+        self.click_timestamps.append(time.monotonic())
         self.clicks_label.setText(f"Clicks this session: {count}")
+        self._update_stats_panel()
 
     @pyqtSlot(str)
     def _on_last_click_time_changed(self, value: str) -> None:
@@ -830,6 +1135,8 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str)
     def _on_clicker_finished(self, reason: str) -> None:
         self._update_status(reason)
+        self.stats_timer.stop()
+        self._update_stats_panel()
 
     def open_hotkey_dialog(self) -> None:
         dialog = HotkeyDialog(
@@ -880,9 +1187,14 @@ class MainWindow(QMainWindow):
     def _apply_picked_position(self) -> None:
         data = getattr(self, "_pending_pick", {"x": None, "y": None})
         if data["x"] is not None and data["y"] is not None:
-            self.x_spin.setValue(int(data["x"]))
-            self.y_spin.setValue(int(data["y"]))
-            self.location_combo.setCurrentText("Fixed XY")
+            if self._pick_target_row is not None and 0 <= self._pick_target_row < self.multipoint_table.rowCount():
+                self.multipoint_table.setItem(self._pick_target_row, 1, QTableWidgetItem(str(int(data["x"]))))
+                self.multipoint_table.setItem(self._pick_target_row, 2, QTableWidgetItem(str(int(data["y"]))))
+                self._pick_target_row = None
+            else:
+                self.x_spin.setValue(int(data["x"]))
+                self.y_spin.setValue(int(data["y"]))
+                self.location_combo.setCurrentText("Fixed XY")
         else:
             QMessageBox.information(self, "Pick Position", "No click captured. Try again.")
         self.showNormal()
