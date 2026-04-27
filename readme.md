@@ -51,11 +51,16 @@ This produces a single `AutoClicker.exe` inside the `dist/` folder. No Python in
 |---|---|
 | **Click type** | Choose Left / Right / Middle from the dropdown |
 | **Single / Double / Triple** | Toggle the click behaviour option |
-| **Click speed** | Enter a number and pick ms or seconds |
-| **Location** | "Current position" follows your cursor. "Fixed" lets you type or pick coordinates |
+| **Click speed** | Set interval using h / m / s / ms fields |
+| **Presets** | Pick Custom / Web Monitor / Gaming (Fast) / Form Filling, then tweak freely |
+| **Location** | "Follow cursor" clicks at cursor. "Fixed XY" lets you type or pick coordinates |
+| **Random offset** | Optional ± pixel jitter around target coordinates |
 | **Pick coordinates** | Click the Pick button, then click anywhere on screen |
 | **Loop mode** | Infinite runs forever. Fixed count stops after N clicks |
+| **Multi-Point mode** | Define up to 10 points with per-point delay and run them in sequence |
 | **Timer mode** | Check the box and set seconds to auto-stop after a duration |
+| **Stats panel** | Expand "Stats" to view session clicks, elapsed time, CPS, and fixed-count progress |
+| **Profiles** | Export current settings to JSON or import a profile from JSON |
 | **Delay before start** | App counts down before clicking begins (default 3 s) |
 | **Start / Stop** | Click the big button or use global hotkeys |
 | **Hotkeys** | Default: F6 to start, F7 to stop. Click the hotkey field and press any key to change |
@@ -75,13 +80,13 @@ Hotkeys work even when the app is in the background.
 
 ## Settings
 
-All settings are saved automatically when you close the app and restored on next launch (`autoclicker_config.json`).
+All settings are saved automatically when you close the app and restored on next launch (`autoclicker_config.json`), including click behaviour, presets, and multi-point sequence.
 
 ---
 
 ## Logs
 
-Error are written to `autoclicker.log` in the same directory as the exe.
+Errors are written to `autoclicker.log` in `%APPDATA%/AutoClicker`.
 
 ---
 
@@ -91,3 +96,4 @@ Error are written to `autoclicker.log` in the same directory as the exe.
 - Works entirely offline
 - Minimum click interval: 10 ms
 - Tested stable at 50 ms intervals over extended sessions
+- If you start below 50 ms, the app shows a confirmation warning once per app session
