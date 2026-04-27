@@ -1,3 +1,6 @@
+import json
+import os
+import random
 import threading
 import time
 from datetime import datetime
@@ -16,6 +19,15 @@ CLICK_BEHAVIOUR_TO_COUNT = {
     "double": 2,
     "triple": 3,
 }
+
+
+def _apply_random_offset(x: int, y: int, config: dict) -> tuple[int, int]:
+    """Apply random offset to x, y if random_offset_enabled is True."""
+    if config.get("random_offset_enabled", False):
+        offset_px = int(config.get("random_offset_px", 5))
+        x += random.randint(-offset_px, offset_px)
+        y += random.randint(-offset_px, offset_px)
+    return x, y
 
 
 class ClickerThread(QThread):
@@ -44,6 +56,7 @@ class ClickerThread(QThread):
         if self.config["location_mode"] == "Fixed XY":
             x = int(self.config["x"])
             y = int(self.config["y"])
+            x, y = _apply_random_offset(x, y, self.config)
             pyautogui.click(
                 x=x,
                 y=y,
@@ -53,13 +66,27 @@ class ClickerThread(QThread):
             )
             return
 
-        pyautogui.click(clicks=click_count, interval=sub_click_interval, button=button)
+        pos = pyautogui.position()
+        x, y = pos.x, pos.y
+        x, y = _apply_random_offset(x, y, self.config)
+        pyautogui.click(
+            x=x,
+            y=y,
+            clicks=click_count,
+            interval=sub_click_interval,
+            button=button,
+        )
 
     def run(self) -> None:
         self._stop_event.clear()
         self.state_changed.emit("Running")
 
-        interval_seconds = max(0.001, float(self.config["interval_ms"]) / 1000.0)
+        interval_h = int(self.config.get("interval_h", 0))
+        interval_m = int(self.config.get("interval_m", 0))
+        interval_s = int(self.config.get("interval_s", 0))
+        interval_ms_val = int(self.config.get("interval_ms", 100))
+        interval_seconds = max(0.001, (interval_h * 3600 + interval_m * 60 + interval_s) + interval_ms_val / 1000.0)
+
         repeat_mode = self.config["repeat_mode"]
         repeat_count = int(self.config["repeat_count"])
         timer_mode = self.config["timer_mode"]
