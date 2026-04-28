@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QComboBox, QSpinBox, QRadioButton,
     QButtonGroup, QCheckBox, QGroupBox, QGridLayout, QFrame,
-    QScrollArea, QSizePolicy, QMessageBox, QFileDialog,
+    QScrollArea, QSizePolicy, QMessageBox,
     QSystemTrayIcon, QMenu, QProgressBar, QStackedWidget,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
 )
@@ -69,7 +69,7 @@ def save_config(cfg):
 STYLE = """
 QWidget {
     background-color: #0e0e0e;
-    color: #e0e0e0;
+    color: #b0b0b0;
     font-family: "Consolas", "Courier New", monospace;
     font-size: 12px;
 }
@@ -116,8 +116,8 @@ QPushButton:pressed {
 }
 QPushButton#btn_start {
     background-color: #1a1a1a;
-    color: #00e676;
-    border: 1px solid #00e676;
+    color: #4caf7d;
+    border: 1px solid #4caf7d;
     font-size: 13px;
     font-weight: bold;
     padding: 10px 20px;
@@ -129,8 +129,8 @@ QPushButton#btn_start:hover {
 }
 QPushButton#btn_stop {
     background-color: #1a1a1a;
-    color: #ff3d3d;
-    border: 1px solid #ff3d3d;
+    color: #c0544a;
+    border: 1px solid #c0544a;
     font-size: 13px;
     font-weight: bold;
     padding: 10px 20px;
@@ -143,6 +143,10 @@ QPushButton#btn_stop:hover {
 QPushButton#btn_record {
     color: #ff3d3d;
     border-color: #ff3d3d;
+}
+QPushButton#btn_play {
+    color: #4caf7d;
+    border-color: #4caf7d;
 }
 QPushButton#btn_record:hover {
     background-color: #ff3d3d;
@@ -157,8 +161,8 @@ QPushButton#btn_play:hover {
     color: #0e0e0e;
 }
 QPushButton#btn_pick {
-    color: #64b5f6;
-    border-color: #64b5f6;
+    color: #5a8fa8;
+    border-color: #5a8fa8;
     padding: 5px 10px;
     font-size: 11px;
 }
@@ -218,12 +222,12 @@ QCheckBox::indicator {
     border-radius: 3px;
 }
 QRadioButton::indicator:checked {
-    background-color: #00e676;
-    border-color: #00e676;
+    background-color: #4caf7d;
+    border-color: #4caf7d;
 }
 QCheckBox::indicator:checked {
-    background-color: #00e676;
-    border-color: #00e676;
+    background-color: #4caf7d;
+    border-color: #4caf7d;
 }
 
 /* Labels */
@@ -241,7 +245,7 @@ QLabel#lbl_status {
     letter-spacing: 1px;
 }
 QLabel#lbl_stat_val {
-    color: #00e676;
+    color: #4caf7d;
     font-size: 13px;
     font-weight: bold;
 }
@@ -256,7 +260,7 @@ QProgressBar {
     color: transparent;
 }
 QProgressBar::chunk {
-    background-color: #00e676;
+    background-color: #4caf7d;
     border-radius: 3px;
 }
 
@@ -321,7 +325,6 @@ class ClickWorker(QObject):
 
         interval_ms = (cfg["interval_h"] * 3600 + cfg["interval_m"] * 60 +
                        cfg["interval_s"]) * 1000 + cfg["interval_ms"]
-        interval_ms = max(10, interval_ms)
 
         btn = cfg["click_type"].lower()
         behaviour = cfg["click_behaviour"]
@@ -443,7 +446,6 @@ class AutoClickerWindow(QMainWindow):
         self.session_clicks = 0
         self.session_start = None
         self.recent_times = []
-        self._warned_fast = False
         self._pick_target = None  # "main" or int (multipoint row)
 
         self.hotkey = HotkeyListener()
@@ -559,11 +561,6 @@ class AutoClickerWindow(QMainWindow):
         self.lbl_interval_total = QLabel("= 100ms")
         self.lbl_interval_total.setStyleSheet("color:#555; font-size:11px;")
         gcl.addWidget(self.lbl_interval_total, 3, 1)
-
-        self.lbl_warning = QLabel("")
-        self.lbl_warning.setObjectName("lbl_warning")
-        self.lbl_warning.setVisible(False)
-        gcl.addWidget(self.lbl_warning, 4, 0, 1, 2)
 
         il.addWidget(g_click)
 
@@ -723,15 +720,6 @@ class AutoClickerWindow(QMainWindow):
 
 
 
-        prof_row = QHBoxLayout()
-        self.btn_export = QPushButton("Export Profile")
-        self.btn_import = QPushButton("Import Profile")
-        self.btn_export.clicked.connect(self._export_profile)
-        self.btn_import.clicked.connect(self._import_profile)
-        prof_row.addWidget(self.btn_export)
-        prof_row.addWidget(self.btn_import)
-        stl.addLayout(prof_row, 3, 0, 1, 2)
-
         il.addWidget(g_settings)
         il.addStretch()
 
@@ -799,19 +787,7 @@ class AutoClickerWindow(QMainWindow):
     def _on_interval_changed(self):
         total = (self.sp_h.value() * 3600 + self.sp_m.value() * 60 +
                  self.sp_s.value()) * 1000 + self.sp_ms.value()
-        actual = max(10, total)
-        self.lbl_interval_total.setText(f"= {actual} ms")
-
-        if total < 10:
-            self.lbl_warning.setText("⚠  Minimum interval is 10ms")
-            self.lbl_warning.setObjectName("lbl_warning")
-            self.lbl_warning.setVisible(True)
-        elif total < 50:
-            self.lbl_warning.setText("⚠  Very fast — tested stable at 50ms")
-            self.lbl_warning.setObjectName("lbl_advisory")
-            self.lbl_warning.setVisible(True)
-        else:
-            self.lbl_warning.setVisible(False)
+        self.lbl_interval_total.setText(f"= {total} ms")
 
     # ── Presets ────────────────────────────────────────────────────────────────
     def _apply_preset(self, name):
@@ -835,16 +811,6 @@ class AutoClickerWindow(QMainWindow):
             return
         self._read_config()
 
-        total_ms = (self.cfg["interval_h"] * 3600 + self.cfg["interval_m"] * 60 +
-                    self.cfg["interval_s"]) * 1000 + self.cfg["interval_ms"]
-        if total_ms < 50 and not self._warned_fast:
-            r = QMessageBox.question(self, "Fast interval",
-                "You're clicking faster than 50ms. Continue?",
-                QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
-            if r != QMessageBox.StandardButton.Ok:
-                return
-            self._warned_fast = True
-
         delay = self.cfg["delay_before_start"]
         if delay > 0:
             self.lbl_status.setText(f"STARTING IN {delay}s…")
@@ -858,7 +824,7 @@ class AutoClickerWindow(QMainWindow):
         self.session_start = time.time()
         self.recent_times = []
         self.lbl_status.setText("● CLICKING")
-        self.lbl_status.setStyleSheet("color:#00e676; letter-spacing:2px;")
+        self.lbl_status.setStyleSheet("color:#4caf7d; letter-spacing:2px;")
 
         use_multi = self.rb_multi_mode.isChecked()
         seq = self._read_multipoint() if use_multi else None
@@ -1023,38 +989,7 @@ class AutoClickerWindow(QMainWindow):
         save_config(self._read_config())
         QApplication.quit()
 
-    # ── Profile Export/Import ──────────────────────────────────────────────────
-    def _export_profile(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Export Profile",
-                                              "AutoClicker_Profile.json", "JSON (*.json)")
-        if path:
-            try:
-                with open(path, "w") as f:
-                    json.dump(self._read_config(), f, indent=2)
-            except Exception as e:
-                logging.error(f"Export error: {e}")
 
-    def _import_profile(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Import Profile", "", "JSON (*.json)")
-        if not path:
-            return
-        try:
-            with open(path) as f:
-                data = json.load(f)
-            skipped = []
-            for k, v in data.items():
-                if k in self.cfg:
-                    self.cfg[k] = v
-                else:
-                    skipped.append(k)
-            self._apply_config()
-            msg = "Profile loaded."
-            if skipped:
-                msg += f"\nSkipped unknown keys: {', '.join(skipped)}"
-            QMessageBox.information(self, "Profile Imported", msg)
-        except Exception as e:
-            logging.error(f"Import error: {e}")
-            QMessageBox.warning(self, "Import Failed", str(e))
 
 
 # ── Entry Point ────────────────────────────────────────────────────────────────

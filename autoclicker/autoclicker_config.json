@@ -2,19 +2,19 @@
   "interval_h": 0,
   "interval_m": 0,
   "interval_s": 0,
-  "interval_ms": 499,
-  "click_type": "Middle",
+  "interval_ms": 40,
+  "click_type": "Left",
   "click_behaviour": "Single",
-  "location_mode": "Fixed",
+  "location_mode": "Current",
   "fixed_x": 411,
-  "fixed_y": 537,
-  "loop_mode": "Fixed",
-  "fixed_count": 1,
+  "fixed_y": 542,
+  "loop_mode": "Infinite",
+  "fixed_count": 5,
   "timer_enabled": false,
   "timer_seconds": 10,
   "delay_before_start": 3,
   "random_offset_enabled": false,
-  "random_offset_px": 9,
+  "random_offset_px": 7,
   "multipoint_sequence": [
     {
       "x": 339,
@@ -27,7 +27,7 @@
       "delay_ms": 100
     }
   ],
-  "last_preset": "Form Filling",
+  "last_preset": "Custom",
   "hotkey_start": "f6",
   "hotkey_stop": "f7"
 }
