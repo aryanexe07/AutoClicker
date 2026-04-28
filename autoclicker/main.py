@@ -37,7 +37,6 @@ DEFAULTS = {
     "timer_enabled": False, "timer_seconds": 10,
     "delay_before_start": 3,
     "random_offset_enabled": False, "random_offset_px": 5,
-    "tray_on_close": True,
     "multipoint_sequence": [],
     "last_preset": "Custom",
     "hotkey_start": "f6", "hotkey_stop": "f7",
@@ -307,10 +306,10 @@ class ClickWorker(QObject):
     finished = pyqtSignal()
     tick = pyqtSignal()
 
-    def __init__(self, cfg, recording=None):
+    def __init__(self, cfg, multipoint=None):
         super().__init__()
         self.cfg = cfg
-        self.recording = recording
+        self.multipoint = multipoint
         self._running = False
 
     def stop(self):
@@ -336,7 +335,7 @@ class ClickWorker(QObject):
         fixed_x = cfg["fixed_x"]
         fixed_y = cfg["fixed_y"]
 
-        multipoint = self.recording  # reuse field for multipoint too
+        multipoint = self.multipoint  # reuse field for multipoint too
         use_multipoint = isinstance(multipoint, list) and len(multipoint) > 0
 
         start_time = time.time()
@@ -430,29 +429,7 @@ class HotkeyListener(QObject):
         return self._listener is not None and self._listener.is_alive()
 
 
-# ── Pick Position Overlay ──────────────────────────────────────────────────────
-class PickOverlay(QWidget):
-    picked = pyqtSignal(int, int)
 
-    def __init__(self):
-        super().__init__()
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint |
-                            Qt.WindowType.WindowStaysOnTopHint |
-                            Qt.WindowType.Tool)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setCursor(Qt.CursorShape.CrossCursor)
-        screen = QApplication.primaryScreen().geometry()
-        self.setGeometry(screen)
-        self.showFullScreen()
-
-    def mousePressEvent(self, event):
-        x, y = event.globalPosition().x(), event.globalPosition().y()
-        self.picked.emit(int(x), int(y))
-        self.close()
-
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Escape:
-            self.close()
 
 
 # ── Main Window ────────────────────────────────────────────────────────────────
@@ -466,9 +443,6 @@ class AutoClickerWindow(QMainWindow):
         self.session_clicks = 0
         self.session_start = None
         self.recent_times = []
-        self.recording = []
-        self.is_recording = False
-        self.mouse_listener = None
         self._warned_fast = False
         self._pick_target = None  # "main" or int (multipoint row)
 
@@ -704,29 +678,7 @@ class AutoClickerWindow(QMainWindow):
 
         il.addWidget(g_multi)
 
-        # ── Record & Playback ──────────────────────────────────────────────────
-        g_rec = QGroupBox("Record & Playback")
-        rl = QVBoxLayout(g_rec)
 
-        rec_btn_row = QHBoxLayout()
-        self.btn_record = QPushButton("⏺  Record")
-        self.btn_record.setObjectName("btn_record")
-        self.btn_play = QPushButton("▶  Play Recording")
-        self.btn_play.setObjectName("btn_play")
-        self.btn_clear_rec = QPushButton("Clear")
-        self.btn_record.clicked.connect(self._toggle_record)
-        self.btn_play.clicked.connect(self._play_recording)
-        self.btn_clear_rec.clicked.connect(self._clear_recording)
-        rec_btn_row.addWidget(self.btn_record)
-        rec_btn_row.addWidget(self.btn_play)
-        rec_btn_row.addWidget(self.btn_clear_rec)
-        rl.addLayout(rec_btn_row)
-
-        self.lbl_rec_status = QLabel("No recording")
-        self.lbl_rec_status.setStyleSheet("color:#555; font-size:11px;")
-        rl.addWidget(self.lbl_rec_status)
-
-        il.addWidget(g_rec)
 
         # ── Stats ──────────────────────────────────────────────────────────────
         g_stats = QGroupBox("Stats")
@@ -769,8 +721,7 @@ class AutoClickerWindow(QMainWindow):
         self.btn_hk_stop.clicked.connect(lambda: self._capture_hotkey("stop"))
         stl.addWidget(self.btn_hk_stop, 1, 1)
 
-        self.chk_tray = QCheckBox("Minimise to tray on close")
-        stl.addWidget(self.chk_tray, 2, 0, 1, 2)
+
 
         prof_row = QHBoxLayout()
         self.btn_export = QPushButton("Export Profile")
@@ -814,7 +765,7 @@ class AutoClickerWindow(QMainWindow):
         self.chk_timer.setChecked(c["timer_enabled"])
         self.sp_timer.setValue(c["timer_seconds"])
         self.sp_delay.setValue(c["delay_before_start"])
-        self.chk_tray.setChecked(c["tray_on_close"])
+
         self.cmb_preset.setCurrentText(c.get("last_preset", "Custom"))
         self._on_interval_changed()
         for pt in c.get("multipoint_sequence", []):
@@ -839,7 +790,7 @@ class AutoClickerWindow(QMainWindow):
         c["timer_enabled"] = self.chk_timer.isChecked()
         c["timer_seconds"] = self.sp_timer.value()
         c["delay_before_start"] = self.sp_delay.value()
-        c["tray_on_close"] = self.chk_tray.isChecked()
+
         c["last_preset"] = self.cmb_preset.currentText()
         c["multipoint_sequence"] = self._read_multipoint()
         return c
@@ -912,7 +863,7 @@ class AutoClickerWindow(QMainWindow):
         use_multi = self.rb_multi_mode.isChecked()
         seq = self._read_multipoint() if use_multi else None
 
-        self.worker = ClickWorker(dict(self.cfg), recording=seq)
+        self.worker = ClickWorker(dict(self.cfg), multipoint=seq)
         self.worker_thread = QThread()
         self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)
@@ -956,6 +907,29 @@ class AutoClickerWindow(QMainWindow):
         cps = len(self.recent_times) / 5.0 if self.recent_times else 0
         self.lbl_cps.setText(f"{cps:.1f}")
 
+    # ── Pick Position ───────────────────────────────────────────────────────────
+    def _start_pick(self, target):
+        self._pick_target = target
+        self.showMinimized()
+        self.tray.showMessage("AutoClicker", "Click anywhere to pick position", QSystemTrayIcon.MessageIcon.Information, 3000)
+        self._pick_listener = pmouse.Listener(on_click=self._on_pick_click)
+        self._pick_listener.start()
+
+    def _on_pick_click(self, x, y, button, pressed):
+        if pressed and button == pmouse.Button.left:
+            self._pick_listener.stop()
+            self.showNormal()
+            self.activateWindow()
+            if self._pick_target == "main":
+                self.sp_fx.setValue(x)
+                self.sp_fy.setValue(y)
+                self.rb_fixed.setChecked(True)
+            elif isinstance(self._pick_target, int):
+                row = self._pick_target
+                if self.mp_table.item(row, 1):
+                    self.mp_table.item(row, 1).setText(str(x))
+                    self.mp_table.item(row, 2).setText(str(y))
+
     # ── Multi-Point ────────────────────────────────────────────────────────────
     def _mp_add_row(self, pt=None):
         if self.mp_table.rowCount() >= 10:
@@ -983,77 +957,19 @@ class AutoClickerWindow(QMainWindow):
                 pass
         return pts
 
-    # ── Pick Overlay ───────────────────────────────────────────────────────────
-    def _start_pick(self, target):
-        self._pick_target = target
-        self.hide()
-        QTimer.singleShot(300, self._show_pick_overlay)
 
-    def _show_pick_overlay(self):
-        self._overlay = PickOverlay()
-        self._overlay.picked.connect(self._on_picked)
-        self._overlay.show()
 
-    def _on_picked(self, x, y):
-        self.show()
-        if self._pick_target == "main":
-            self.sp_fx.setValue(x)
-            self.sp_fy.setValue(y)
-            self.rb_fixed.setChecked(True)
-        elif isinstance(self._pick_target, int):
-            row = self._pick_target
-            if self.mp_table.item(row, 1):
-                self.mp_table.item(row, 1).setText(str(x))
-                self.mp_table.item(row, 2).setText(str(y))
 
-    # ── Record & Playback ──────────────────────────────────────────────────────
-    def _toggle_record(self):
-        if not self.is_recording:
-            self.recording = []
-            self._last_click_time = None
-            self.is_recording = True
-            self.btn_record.setText("⏹  Stop Recording")
-            self.lbl_rec_status.setText("Recording… 0 clicks")
-            self.mouse_listener = pmouse.Listener(on_click=self._on_mouse_click)
-            self.mouse_listener.start()
-        else:
-            self.is_recording = False
-            if self.mouse_listener:
-                self.mouse_listener.stop()
-            self.btn_record.setText("⏺  Record")
-            self.lbl_rec_status.setText(f"{len(self.recording)} clicks recorded — ready")
 
-    def _on_mouse_click(self, x, y, button, pressed):
-        if not pressed or not self.is_recording:
-            return
-        if len(self.recording) >= 20:
-            return
-        now = time.time()
-        delay = int((now - self._last_click_time) * 1000) if self._last_click_time else 0
-        self._last_click_time = now
-        self.recording.append({"x": x, "y": y, "delay_ms": delay})
-        self.lbl_rec_status.setText(f"Recording… {len(self.recording)} clicks")
 
-    def _play_recording(self):
-        if not self.recording:
-            return
-        self._read_config()
-        self.is_clicking = True
-        self.session_clicks = 0
-        self.session_start = time.time()
-        self.lbl_status.setText("● PLAYING")
-        self.lbl_status.setStyleSheet("color:#00e676; letter-spacing:2px;")
-        self.worker = ClickWorker(dict(self.cfg), recording=self.recording)
-        self.worker_thread = QThread()
-        self.worker.moveToThread(self.worker_thread)
-        self.worker_thread.started.connect(self.worker.run)
-        self.worker.finished.connect(self._on_worker_done)
-        self.worker.tick.connect(self._on_tick)
-        self.worker_thread.start()
 
-    def _clear_recording(self):
-        self.recording = []
-        self.lbl_rec_status.setText("No recording")
+
+
+
+
+
+
+
 
     # ── Hotkeys ────────────────────────────────────────────────────────────────
     def _capture_hotkey(self, target):
@@ -1100,13 +1016,7 @@ class AutoClickerWindow(QMainWindow):
         self.tray.show()
 
     def closeEvent(self, event):
-        if self.chk_tray.isChecked():
-            event.ignore()
-            self.hide()
-            self.tray.showMessage("AutoClicker", "Running in tray. Right-click to access.",
-                                  QSystemTrayIcon.MessageIcon.Information, 2000)
-        else:
-            self._quit()
+        self._quit()
 
     def _quit(self):
         self.stop_clicking()
