@@ -1,6 +1,23 @@
 # AutoClicker
 
-A lightweight Python desktop auto clicker for Windows with a clean, minimal UI.
+AutoClicker is a Windows desktop auto-clicker built in Python with a lightweight PyQt6 GUI. It supports cursor-following or fixed-coordinate clicking, multi-point sequences, configurable hotkeys, and several run modes for automation tasks.
+
+---
+
+## Features
+
+- Left / Right / Middle mouse clicks
+- Single, double, or triple click behaviour
+- Interval configuration in hours, minutes, seconds, and milliseconds
+- Fixed count and infinite repeat modes
+- Timer-based stop after a duration
+- Delay before starting the click sequence
+- Follow-cursor or fixed XY click location
+- Random coordinate offset for more natural click patterns
+- Multi-point sequence support for repeated point-based workflows
+- Preset modes for Web Monitor, Gaming (Fast), and Form Filling
+- Global hotkeys for start/stop control
+- Persistent configuration saved between launches
 
 ---
 
@@ -9,91 +26,91 @@ A lightweight Python desktop auto clicker for Windows with a clean, minimal UI.
 - Windows 10 or 11
 - Python 3.10+
 
-## Installation
+---
+
+## Install
+
+1. Open a terminal in the project root.
+2. Install the dependencies:
 
 ```bash
-pip install pyqt6 pyautogui pynput
+pip install -r autoclicker/requirements.txt
 ```
 
 ---
 
-## Running from source
+## Run from source
+
+From the project root:
 
 ```bash
-python main.py
+python autoclicker/main.py
 ```
 
 ---
 
-## Building the .exe
+## Build a Windows executable
 
-Make sure PyInstaller is installed:
+Install PyInstaller if needed:
 
 ```bash
 pip install pyinstaller
 ```
 
-Then run the included build script:
+Then build using the existing spec file:
 
 ```bash
-build.bat
+cd autoclicker
+pyinstaller build.spec
 ```
 
-This produces a single `AutoClicker.exe` inside the `dist/` folder. No Python installation required on the target machine.
-
-> If you don't have an `icon.ico`, remove `--icon=icon.ico` from `build.bat` before running.
+The generated executable will appear in the `dist/AutoClicker/` folder.
 
 ---
 
-## Usage
+## Configuration
 
-| Feature | How to use |
-|---|---|
-| **Click type** | Choose Left / Right / Middle from the dropdown |
-| **Single / Double / Triple** | Toggle the click behaviour option |
-| **Click speed** | Set interval using h / m / s / ms fields |
-| **Presets** | Pick Custom / Web Monitor / Gaming (Fast) / Form Filling, then tweak freely |
-| **Location** | "Follow cursor" clicks at cursor. "Fixed XY" lets you type or pick coordinates |
-| **Random offset** | Optional ± pixel jitter around target coordinates |
-| **Pick coordinates** | Click the Pick button, then click anywhere on screen |
-| **Loop mode** | Infinite runs forever. Fixed count stops after N clicks |
-| **Multi-Point mode** | Define up to 10 points with per-point delay and run them in sequence |
-| **Timer mode** | Check the box and set seconds to auto-stop after a duration |
-| **Stats panel** | Expand "Stats" to view session clicks, elapsed time, CPS, and fixed-count progress |
-| **Profiles** | Export current settings to JSON or import a profile from JSON |
-| **Delay before start** | App counts down before clicking begins (default 3 s) |
-| **Start / Stop** | Click the big button or use global hotkeys |
-| **Hotkeys** | Default: F6 to start, F7 to stop. Click the hotkey field and press any key to change |
+- Runtime settings are persisted in `autoclicker_config.json`.
+- Settings include hotkeys, click interval, repeat mode, timer settings, random offset, and multi-point sequence data.
+- When run from source, logs are written to `autoclicker.log` in the same folder.
 
 ---
 
-## Default hotkeys
+## Hotkeys
 
-| Action | Key |
-|---|---|
-| Start | F6 |
-| Stop | F7 |
+- **Start:** `F6`
+- **Stop:** `F7`
 
-Hotkeys work even when the app is in the background.
+Hotkeys are handled globally so you can control clicking while the app is in the background.
 
 ---
 
-## Settings
+## Testing
 
-All settings are saved automatically when you close the app and restored on next launch (`autoclicker_config.json`), including click behaviour, presets, and multi-point sequence.
+Run the unit tests with:
+
+```bash
+python -m unittest discover tests
+```
+
+The tests cover click behavior mapping, fixed coordinate clicks, and multi-point sequence logic.
 
 ---
 
-## Logs
+## Project structure
 
-Errors are written to `autoclicker.log` in `%APPDATA%/AutoClicker`.
+- `autoclicker/main.py` — main application entry point and UI
+- `autoclicker/core/clicker.py` — click execution and thread logic
+- `autoclicker/core/settings.py` — persistent settings storage
+- `autoclicker/requirements.txt` — required Python dependencies
+- `autoclicker/build.spec` — PyInstaller build spec for packaging
+- `tests/test_clicker.py` — automated unit tests
 
 ---
 
 ## Notes
 
 - No admin privileges required
-- Works entirely offline
-- Minimum click interval: 10 ms
-- Tested stable at 50 ms intervals over extended sessions
-- If you start below 50 ms, the app shows a confirmation warning once per app session
+- Works offline
+- The app is designed for Windows and uses PyQt6 for its GUI
+- If a preset or saved configuration is invalid, the app falls back to default settings automatically
