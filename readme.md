@@ -1,5 +1,7 @@
 # AutoClicker
 
+**Version:** 1.0.0
+
 AutoClicker is a Windows desktop auto-clicker built in Python with a lightweight PyQt6 GUI. It supports cursor-following or fixed-coordinate clicking, multi-point sequences, configurable hotkeys, and several run modes for automation tasks.
 
 ---
